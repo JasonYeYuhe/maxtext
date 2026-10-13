@@ -238,6 +238,7 @@ jobs:
           # Clean up any checkpoint directories created by the notebook to avoid filling up disk space
           echo "Post-notebook disk cleanup for $NOTEBOOK_NAME ..."
           rm -rf "$MAXTEXT_PKG_DIR"/*_output
+          rm -rf /tmp/dpo_demo*
           rm -rf "$HOME/.cache/huggingface/hub"
       - name: Upload Outputs
         if: always()
