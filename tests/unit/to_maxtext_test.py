@@ -27,6 +27,7 @@ except ImportError:
 pytestmark = [pytest.mark.decoupled_target]
 
 from maxtext.checkpoint_conversion.to_maxtext import (
+    _build_single_axis_stacked_tensor,
     _convert_tensor_to_numpy,
     _extract_conversion_args,
     resolve_scale_key,
@@ -100,6 +101,37 @@ class ExtractConversionArgsTest(unittest.TestCase):
     self.assertEqual(extracted["eager_load_method"], "safetensors")
     self.assertEqual(extracted["simulated_cpu_devices_count"], 4)
     self.assertEqual(remaining, ["base.yml", "model_name=qwen3.5-35b-a3b-fp8", "steps=10"])
+
+
+class BuildSingleAxisStackedTensorTest(unittest.TestCase):
+  """Tests the stacking axis of _build_single_axis_stacked_tensor with scanned layers."""
+
+  class _Config:
+    scan_layers = True
+    param_scan_axis = 1
+
+  def _stack(self, mt_key, target_shape):
+    tensors = {"k0": np.zeros((4, 8), np.float32), "k1": np.ones((4, 8), np.float32)}
+    return _build_single_axis_stacked_tensor(
+        ["k0", "k1"], tensors.__getitem__, None, target_shape, self._Config(), mt_key
+    )
+
+  def test_scanned_moe_block_stacks_layers_on_scan_axis(self):
+    # e.g. mixtral and deepseek2/3: the list is over layers of a scanned stack.
+    for mt_key in (
+        "params-decoder-layers-MoeBlock_0-gate-kernel",
+        "params-decoder-moe_layers-DeepSeekMoeBlock_0-MoeBlock_0-gate-kernel",
+    ):
+      with self.subTest(mt_key=mt_key):
+        result = self._stack(mt_key, (4, 2, 8))
+        self.assertEqual(result.shape, (4, 2, 8))
+        np.testing.assert_array_equal(result[:, 1], np.ones((4, 8)))
+
+  def test_unscanned_layer_moe_block_stacks_experts_on_axis_0(self):
+    # e.g. DeepSeek V4: an unscanned layer whose list is over experts.
+    result = self._stack("params-decoder-layers_0-mlp-MoeBlock_0-wi_0", (2, 4, 8))
+    self.assertEqual(result.shape, (2, 4, 8))
+    np.testing.assert_array_equal(result[1], np.ones((4, 8)))
 
 
 if __name__ == "__main__":
